@@ -1,0 +1,138 @@
+---
+title: "Tidycensus"
+output: html_document
+---
+
+
+# Load packages
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidycensus)
+library(tidyverse)
+library(sf)
+library(viridis)
+```
+
+
+# Tidycensus
+
+[Tidycensus](https://walker-data.com/tidycensus/) is an R package that allows users to interface with a select number of the US Census Bureau’s data APIs and return tidyverse-ready data frames, optionally with simple feature geometry included. 
+
+The first step to start working with Tidycensus is to request a Census API key. 
+(1) You should request an API key here: http://api.census.gov/data/key_signup.html
+(2) Then, you should run the code chunk below with the census_api_key() function ONCE. Make sure to substitute the XXXXXX string for your own Census API key.
+(3) You will be prompted to restart your R session. Do it, and then you can comment out the line with the census_api_key().
+
+
+```{r tidycensus, include=FALSE}
+#census_api_key("XXXXXXXXXXXXXXXXXXXXXXXXXXX", install = TRUE) # Substitute the XXXXXX string for your own Census API key
+```
+
+
+```{r tidycensus options, include=FALSE}
+options(tigris_use_cache = TRUE)
+```
+
+
+
+## Searching for variables
+
+Getting variables from the US American Community Survey (ACS) 5-Year Data (2019-2023) requires knowing the variable ID - and there are thousands of these IDs across the different files. To rapidly search for variables, use the `load_variables()` function. 
+The function takes two required arguments: the year of the Census or endyear of the ACS sample, and the dataset name, which varies in availability by year. 
+For this assignment, use `2023` and `acs5`.
+You can then filter the dataframe to focus on variables you are interested in.
+
+```{r}
+view_vars <- load_variables(2023, "acs5", cache = TRUE)
+
+View(view_vars)
+
+view_vars_filter <- view_vars %>% filter(str_detect(concept, regex("income", ignore_case = TRUE))) 
+
+View(view_vars_filter)
+
+```
+
+
+# Accessing *variables* from the ACS
+
+The following example demonstrates how to extract a variable summarising median household income from the 2019-2023 ACS for Census tracts on the island of Manhattan (New York City), which corresponds to New York County:
+```{r nyc}
+
+nyc <- get_acs(
+  state = "NY",
+  county = "New York",
+  geography = "tract",
+  variables = "B19013_001",
+  geometry = TRUE,
+  year = 2023
+)
+
+head(nyc)
+```
+
+We can then map median household income in Manhattan:
+```{r}
+nyc %>%
+  ggplot(aes(fill = estimate)) + 
+  geom_sf(color = NA) + 
+  scale_fill_viridis_c(option = "magma") 
+```
+
+
+You can replicate this process for any other variable of interest, or for any other county in the US.
+
+In this assessment we will focus on Los Angeles County, California,. So, `state = "CA"` and `county = "Los Angeles"`
+
+# Accessing *tables*, which contain several variables, from the ACS
+
+We can access all variables in a given category by using the `table` argument. For instance, to access all variables related to race in New York County, New York, we can use the following code:
+
+```{r Population Race}
+table_race <- get_acs(
+  state = "NY",
+  county = "New York",
+  geography = "tract",
+  table = "B02001",  # use table to GET all the variables in this given category
+  output = "wide",
+  year = 2023
+)
+
+table_race <- select(table_race,-c(NAME))
+table_race <- rename(table_race, all_ppl_race = B02001_001E, black = B02001_003E)
+
+head(table_race)
+
+```
+
+# Join
+
+Imagine that, following the steps above, you have saved the variables we are interested in four different dataframes: table_v1, table_v2, table_v3, and table_v4. To plot them, you would need to join these dataframes with the original nyc object, as this is the only one for which we have also downloaded the geometry. 
+
+To do this, we will utilize the fact that all dataframes have a common column, the GEOID. We can then use the `left_join()` function to merge the dataframes.
+
+Note: Make sure you have obtained all data at the census tract level (geography = "tract"), otherwise, the GEOIDs of the different dataframes will not match. 
+
+```{r}
+
+tables_all <- left_join(nyc, table_v1, by = "GEOID") %>%
+  left_join(table_v2, by = "GEOID") %>%
+  left_join(table_v3, by = "GEOID") %>%
+  left_join(table_v4, by = "GEOID") 
+
+head(tables_all)
+
+# You can export your dataframe as a table:
+st_write(tables_all, "data/Summative_ACS_2019_2023_vars.csv", delete_dsn = TRUE)
+
+# Or as geopackage that you can load into QGIS, for instance:
+st_write(tables_all, 
+        dsn = "data/Summative_ACS_2019_2023_spatial.gpkg",
+        driver = "GPKG", 
+        delete_dsn = TRUE)
+
+```
+
+
+
